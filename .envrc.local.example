@@ -1,0 +1,2 @@
+export CLUSTER_HOST=sling
+export CLUSTER_DIR=fri-2026-vzr-p2

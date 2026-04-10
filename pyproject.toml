@@ -1,0 +1,26 @@
+[project]
+name = "vzr-p2"
+version = "0.1.0"
+requires-python = "==3.14.*"
+dependencies = [
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
+    "pandas>=3.0.1",
+    "seaborn>=0.13.2",
+]
+
+[project.scripts]
+bench = "vzr_p2.bench:main"
+
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "src_python"
+
+[tool.ruff]
+src = ["src_python"]
+
+[tool.pyright]
+extraPaths = ["src_python"]
