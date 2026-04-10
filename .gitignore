@@ -1,0 +1,15 @@
+# Direnv
+/.envrc.local
+/.direnv
+
+# Python
+/.venv/
+__pycache__/
+*.py[oc]
+/dist/
+
+# Project specific
+/build/
+compile_commands.json
+compile_commands.tmp
+*.out.*
