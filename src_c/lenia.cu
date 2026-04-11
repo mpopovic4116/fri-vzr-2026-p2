@@ -12,7 +12,11 @@
 // #include <cuda.h>
 
 // Uncomment to generate gif animation
-#define GENERATE_GIF
+// #define GENERATE_GIF
+
+#define CONST_DEVICE_SIZE 1024
+
+__constant__ double w_device_constant[CONST_DEVICE_SIZE];
 
 // uncomment to use cpu instead
 // #define CPU
@@ -84,7 +88,7 @@ inline double *convolve2d(double *result, const double *input, const double *w, 
     return result;
 }
 // gpu version of funct convolve2d
-__global__ void conv_kernel(double *result, double *input, double *w, int rows, int cols, int k_size)
+__global__ void conv_kernel(double *result, double *input, int rows, int cols, int k_size)
 {
     int i = blockIdx.y * blockDim.y + threadIdx.y; // curr row
     int j = blockIdx.x * blockDim.x + threadIdx.x; // curr col
@@ -101,7 +105,7 @@ __global__ void conv_kernel(double *result, double *input, double *w, int rows, 
             for (int kj = 0; kj < w_cols; kj++) {
                 int kcj = w_cols - kj - 1;
                 // kri and kcj because we fist flip the kernel
-                sum += w[(ki) *w_cols + (kj)] * input[(((i - w_rows / 2 + rows + kri)) % rows) * cols + (((j - w_cols / 2 + cols + kcj)) % cols)];
+                sum += w_device_constant[(ki) *w_cols + (kj)] * input[(((i - w_rows / 2 + rows + kri)) % rows) * cols + (((j - w_cols / 2 + cols + kcj)) % cols)];
             }
         }
         result[i * cols + j] = sum;
@@ -158,10 +162,10 @@ double *evolve_lenia(const unsigned int rows, const unsigned int cols, const uns
     double *tmp_host = (double *) calloc(rows * cols, sizeof(double));
 #ifndef CPU
     // device memory alloc
-    double *world_device, *tmp_device, *w_device;
+    double *world_device, *tmp_device;
     cudaMalloc((void **) &world_device, grid_size);
     cudaMalloc((void **) &tmp_device, grid_size);
-    cudaMalloc((void **) &w_device, kernel_size_memory);
+    // cudaMalloc((void **) &w_device, kernel_size_memory);
 #endif
     // Generate convolution kernel
     w_host = generate_kernel(w_host, kernel_size);
@@ -194,14 +198,15 @@ double *evolve_lenia(const unsigned int rows, const unsigned int cols, const uns
 #else
     // copy mem host -> device
     cudaMemcpy(world_device, world_host, grid_size, cudaMemcpyHostToDevice);
-    cudaMemcpy(w_device, w_host, kernel_size_memory, cudaMemcpyHostToDevice);
+    // cudaMemcpy(w_device, w_host, kernel_size_memory, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(w_device_constant, w_host, kernel_size_memory, 0, cudaMemcpyHostToDevice); // move kernel to constant memory
 
     // lets use 16x16 threads
     dim3 threadsPerBlock(16, 16);
     dim3 numBlocks(cols / threadsPerBlock.x, rows / threadsPerBlock.y);
     // loop where we call the kernels
     for (unsigned int step = 0; step < steps; step++) {
-        conv_kernel<<<numBlocks, threadsPerBlock>>>(tmp_device, world_device, w_device, rows, cols, kernel_size);
+        conv_kernel<<<numBlocks, threadsPerBlock>>>(tmp_device, world_device, rows, cols, kernel_size);
         update_kernel<<<numBlocks, threadsPerBlock>>>(world_device, tmp_device, rows, cols, dt);
 
 #ifdef GENERATE_GIF
@@ -220,7 +225,7 @@ double *evolve_lenia(const unsigned int rows, const unsigned int cols, const uns
 #ifndef CPU
     cudaFree(world_device);
     cudaFree(tmp_device);
-    cudaFree(w_device);
+    // cudaFree(w_device);
 #endif
     free(w_host);
     free(tmp_host);
