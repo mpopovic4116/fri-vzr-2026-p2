@@ -51,7 +51,7 @@ ifeq ($(impl),omp)
 	SRCS += $(SRC)/impl_cpu.c
 endif
 ifeq ($(impl),cuda)
-	SRCS += $(SRC)/impl_lenia.cu
+	SRCS += $(SRC)/impl_cuda.cu
 endif
 ifneq ($(gif),)
 	SRCS += $(SRC)/gifenc.c
