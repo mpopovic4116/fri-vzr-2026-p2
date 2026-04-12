@@ -15,4 +15,4 @@
 - /build
 - compile_commands.json
 - compile_commands.tmp
-- *.out.png
+- *.gif
