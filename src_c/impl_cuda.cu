@@ -13,6 +13,9 @@
 #define ROWS FEAT_SIZE_H
 #define COLS FEAT_SIZE_W
 
+#define TILE_W 16
+#define TILE_H 16
+
 struct lenia_impl_state
 {
     int pixels;
@@ -27,6 +30,7 @@ struct lenia_impl_state
     fcuda *tmp_device;
     uint8_t *world_bytes_host;
     uint8_t *world_bytes_device;
+    int local_memory_size;
 };
 
 static fhost gauss(fhost x, fhost mu, fhost sigma)
@@ -76,8 +80,9 @@ struct lenia_impl_state *lenia_impl_init()
     state->pixels = ROWS * COLS;
     state->grid_size = ROWS * COLS * sizeof(fcuda);
     state->kernel_size_memory = FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE * sizeof(fcuda);
-    state->threadsPerBlock = dim3(16, 16);
-    state->numBlocks = dim3(COLS / state->threadsPerBlock.x, ROWS / state->threadsPerBlock.y);
+    state->threadsPerBlock = dim3(TILE_W, TILE_H);
+    state->local_memory_size = (TILE_W + FEAT_KERNEL_SIZE) * (TILE_W + FEAT_KERNEL_SIZE) * sizeof(fcuda);
+    state->numBlocks = dim3((COLS + TILE_W - 1) / TILE_W, (ROWS + TILE_H - 1) / TILE_H);
     state->w_host = (fhost *) calloc(FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE, sizeof(fhost));
     state->world_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
     state->tmp_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
@@ -134,6 +139,47 @@ static __global__ void conv_kernel(fcuda *result, fcuda *input, int rows, int co
         result[i * cols + j] = sum;
     }
 }
+// improved version of conv_kernel, uses local(shared) memory
+static __global__ void conv_kernel_shared(fcuda *result, fcuda *input, int rows, int cols, int k_size)
+{
+    extern __shared__ fcuda tile[];
+
+    int x = blockIdx.x * TILE_W + threadIdx.x;
+    int y = blockIdx.y * TILE_H + threadIdx.y;
+
+    int r = k_size / 2;
+    int shared_w = TILE_W + k_size;
+
+    // load tile and halo into local mem
+    for (int j = threadIdx.y; j < shared_w; j += TILE_H) {
+        for (int i = threadIdx.x; i < shared_w; i += TILE_W) {
+            // blockIdx.x * TILE_W <- find ur tile
+            // - r <- halo on one side, int shared_w = TILE_W + k_size; <- k_size is 2r, so here we get the other side of the halo
+            // + i / + j <- increment in dir
+            // + cols / + rows <- so we dont mod a neg num
+            int global_x = (blockIdx.x * TILE_W - r + i + cols) % cols;
+            int global_y = (blockIdx.y * TILE_H - r + j + rows) % rows;
+
+            tile[j * shared_w + i] = input[global_y * cols + global_x];
+        }
+    }
+
+    __syncthreads();
+
+    // the normal conv part
+    if (y < rows && x < cols) {
+        fcuda sum = 0;
+        for (int ki = 0; ki < k_size; ki++) {
+            int kri = k_size - ki - 1;
+            for (int kj = 0; kj < k_size; kj++) {
+                int kcj = k_size - kj - 1;
+                // just fetch from local mem
+                sum += w_device_constant[kri * k_size + kcj] * tile[(threadIdx.y + ki) * shared_w + (threadIdx.x + kj)];
+            }
+        }
+        result[y * cols + x] = sum;
+    }
+}
 
 static __global__ void byte_packing_kernel(uint8_t *dst, fcuda *src, int rows, int cols)
 {
@@ -173,7 +219,14 @@ static __global__ void update_kernel(fcuda *world, fcuda *tmp, int rows, int col
 
 void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
 {
-    conv_kernel<<<state->numBlocks, state->threadsPerBlock>>>(state->tmp_device, state->world_device, ROWS, COLS, FEAT_KERNEL_SIZE);
+#ifdef USE_SHARED_MEM
+    conv_kernel_shared<<<state->numBlocks, state->threadsPerBlock, state->local_memory_size>>>(
+        state->tmp_device, state->world_device, ROWS, COLS, FEAT_KERNEL_SIZE);
+#else
+    conv_kernel<<<state->numBlocks, state->threadsPerBlock>>>(
+        state->tmp_device, state->world_device, ROWS, COLS, FEAT_KERNEL_SIZE);
+#endif
+
     update_kernel<<<state->numBlocks, state->threadsPerBlock>>>(state->world_device, state->tmp_device, ROWS, COLS, dt);
 }
 
