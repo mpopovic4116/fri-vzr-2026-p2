@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-bench = "vzr_p2.bench:main"
+kvmean = "vzr_p2.kv_utils:main_kvmean"
 
 [build-system]
 requires = ["uv_build>=0.10.9,<0.11.0"]
