@@ -13,8 +13,8 @@
 #define ROWS FEAT_SIZE_H
 #define COLS FEAT_SIZE_W
 
-#define TILE_W 16
-#define TILE_H 16
+#define TILE_W 32
+#define TILE_H 32
 
 struct lenia_impl_state
 {
@@ -152,13 +152,26 @@ static __global__ void conv_kernel_shared(fcuda *result, fcuda *input, int rows,
 
     // load tile and halo into local mem
     for (int j = threadIdx.y; j < shared_w; j += TILE_H) {
+        // blockIdx.x * TILE_W <- find ur tile
+        // - r <- halo on one side, int shared_w = TILE_W + k_size; <- k_size is 2r, so here we get the other side of the halo
+        // + i / + j <- increment in dir
+        // + cols / + rows <- so we dont mod a neg num
+#ifdef FEAT_BITWISE_MASK
+        // bitwise toroidal wrap (should work as long as cols and rows is a power of 2)
+        int global_y = (blockIdx.y * TILE_H - r + j + rows) & (rows - 1);
+#else
+        // toroidal wrap with %
+        int global_y = (blockIdx.y * TILE_H - r + j + rows) % rows;
+#endif
+
         for (int i = threadIdx.x; i < shared_w; i += TILE_W) {
-            // blockIdx.x * TILE_W <- find ur tile
-            // - r <- halo on one side, int shared_w = TILE_W + k_size; <- k_size is 2r, so here we get the other side of the halo
-            // + i / + j <- increment in dir
-            // + cols / + rows <- so we dont mod a neg num
+#ifdef FEAT_BITWISE_MASK
+            // bitwise toroidal wrap (should work as long as cols and rows is a power of 2)
+            int global_x = (blockIdx.x * TILE_W - r + i + cols) & (cols - 1);
+#else
+            // toroidal wrap with %
             int global_x = (blockIdx.x * TILE_W - r + i + cols) % cols;
-            int global_y = (blockIdx.y * TILE_H - r + j + rows) % rows;
+#endif
 
             tile[j * shared_w + i] = input[global_y * cols + global_x];
         }
@@ -169,8 +182,14 @@ static __global__ void conv_kernel_shared(fcuda *result, fcuda *input, int rows,
     // the normal conv part
     if (y < rows && x < cols) {
         fcuda sum = 0;
+#ifdef DFEAT_UNROLL
+#pragma unroll 16
+#endif
         for (int ki = 0; ki < k_size; ki++) {
             int kri = k_size - ki - 1;
+#ifdef DFEAT_UNROLL
+#pragma unroll 16
+#endif
             for (int kj = 0; kj < k_size; kj++) {
                 int kcj = k_size - kj - 1;
                 // just fetch from local mem
@@ -219,7 +238,7 @@ static __global__ void update_kernel(fcuda *world, fcuda *tmp, int rows, int col
 
 void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
 {
-#ifdef USE_SHARED_MEM
+#ifdef FEAT_SHARED_MEM
     conv_kernel_shared<<<state->numBlocks, state->threadsPerBlock, state->local_memory_size>>>(
         state->tmp_device, state->world_device, ROWS, COLS, FEAT_KERNEL_SIZE);
 #else
