@@ -113,8 +113,11 @@ void lenia_impl_upload(struct lenia_impl_state *state)
     checkCudaErrors(cudaMemcpyToSymbol(w_device_constant, state->w_host, state->kernel_size_memory, 0, cudaMemcpyHostToDevice)); // move kernel to constant memory
 }
 
-// #define w(r, c) (w[(r) * w_cols + (c)])
-// #define input(r, c) (input[((r) % rows) * cols + ((c) % cols)])
+// gpu version of funct gauss
+static __device__ fcuda gauss_device(fcuda x, fcuda mu, fcuda sigma)
+{
+    return exp(-0.5 * ((x - mu) / sigma) * ((x - mu) / sigma));
+}
 
 // gpu version of funct convolve2d
 static __global__ void conv_kernel(fcuda *result, fcuda *input, int rows, int cols, int k_size)
@@ -200,6 +203,65 @@ static __global__ void conv_kernel_shared(fcuda *result, fcuda *input, int rows,
     }
 }
 
+static __global__ void lenia_fused_kernel(fcuda *out_world, fcuda *in_world, int rows, int cols, int k_size, fcuda dt)
+{
+    extern __shared__ fcuda tile[];
+
+    int x = blockIdx.x * TILE_W + threadIdx.x;
+    int y = blockIdx.y * TILE_H + threadIdx.y;
+
+    int r = k_size / 2;
+    int shared_w = TILE_W + k_size;
+
+    const fcuda mu = 0.15;
+    const fcuda sigma = 0.015;
+
+    // load tile and halo into local mem, same code chunk as in function `conv_kernel_shared`, go check that for comments if needed
+    for (int j = threadIdx.y; j < shared_w; j += TILE_H) {
+#ifdef FEAT_BITWISE_MASK
+        int global_y = (blockIdx.y * TILE_H - r + j + rows) & (rows - 1);
+#else
+        int global_y = (blockIdx.y * TILE_H - r + j + rows) % rows;
+#endif
+
+        for (int i = threadIdx.x; i < shared_w; i += TILE_W) {
+#ifdef FEAT_BITWISE_MASK
+            int global_x = (blockIdx.x * TILE_W - r + i + cols) & (cols - 1);
+#else
+            int global_x = (blockIdx.x * TILE_W - r + i + cols) % cols;
+#endif
+
+            tile[j * shared_w + i] = in_world[global_y * cols + global_x];
+        }
+    }
+    __syncthreads();
+
+    // the conv + update part
+    if (y < rows && x < cols) {
+        fcuda sum = 0;
+#ifdef DFEAT_UNROLL
+#pragma unroll 16
+#endif
+        for (int ki = 0; ki < k_size; ki++) {
+            int kri = k_size - ki - 1;
+#ifdef DFEAT_UNROLL
+#pragma unroll 16
+#endif
+            for (int kj = 0; kj < k_size; kj++) {
+                int kcj = k_size - kj - 1;
+                // just fetch from local mem
+                sum += w_device_constant[kri * k_size + kcj] * tile[(threadIdx.y + ki) * shared_w + (threadIdx.x + kj)];
+            }
+        }
+        fcuda growth = -1.0 + 2.0 * gauss_device(sum, mu, sigma);
+        int idx = y * cols + x;
+        fcuda val = in_world[idx] + dt * growth;
+
+        out_world[idx] = fcuda_fmin(1.0, fcuda_fmax(0.0, val));
+    }
+    __syncthreads();
+}
+
 static __global__ void byte_packing_kernel(uint8_t *dst, fcuda *src, int rows, int cols)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -214,17 +276,11 @@ static __global__ void byte_packing_kernel(uint8_t *dst, fcuda *src, int rows, i
     }
 }
 
-// gpu version of funct gauss
-static __device__ fcuda gauss_device(fcuda x, fcuda mu, fcuda sigma)
-{
-    return exp(-0.5 * ((x - mu) / sigma) * ((x - mu) / sigma));
-}
-
 // gpu world updating
 static __global__ void update_kernel(fcuda *world, fcuda *tmp, int rows, int cols, fcuda dt)
 {
-    fcuda mu = 0.15;
-    fcuda sigma = 0.015;
+    const fcuda mu = 0.15;
+    const fcuda sigma = 0.015;
 
     int idx = (blockIdx.y * blockDim.y + threadIdx.y) * cols + (blockIdx.x * blockDim.x + threadIdx.x);
 
@@ -238,15 +294,28 @@ static __global__ void update_kernel(fcuda *world, fcuda *tmp, int rows, int col
 
 void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
 {
-#ifdef FEAT_SHARED_MEM
+#ifdef FEAT_FUSED_IMPL
+    lenia_fused_kernel<<<state->numBlocks, state->threadsPerBlock, state->local_memory_size>>>(
+        state->tmp_device, state->world_device, ROWS, COLS, FEAT_KERNEL_SIZE, (fcuda) dt);
+
+    fcuda *temp = state->world_device;
+    state->world_device = state->tmp_device;
+    state->tmp_device = temp;
+#endif
+
+#ifdef FEAT_SHARED_IMPL
     conv_kernel_shared<<<state->numBlocks, state->threadsPerBlock, state->local_memory_size>>>(
         state->tmp_device, state->world_device, ROWS, COLS, FEAT_KERNEL_SIZE);
-#else
+#endif
+
+#ifdef FEAT_DEFAULT_IMPL
     conv_kernel<<<state->numBlocks, state->threadsPerBlock>>>(
         state->tmp_device, state->world_device, ROWS, COLS, FEAT_KERNEL_SIZE);
 #endif
 
+#ifndef FEAT_FUSED_IMPL
     update_kernel<<<state->numBlocks, state->threadsPerBlock>>>(state->world_device, state->tmp_device, ROWS, COLS, dt);
+#endif
 }
 
 void lenia_impl_dump(struct lenia_impl_state *state, uint8_t *out_frame)

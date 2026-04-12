@@ -6,7 +6,7 @@ size_w ?= 256# Width
 size_h ?= $(size_w)# Height (blank means equal to width)
 kernel_size ?= 26# Convolution kernel size
 precision ?= 64# Floating point precision, 64, 32 or 16 (16 is really slow on CPU because no native instructions)
-shared ?=# Set to non-blank to use shared memory conv kernel
+kernel ?= default# kernel implementation (default, shared, fused)
 toroid= ?= bitwise# toroidal wrap with: (mod, bitwise)
 unroll ?=# Set to non-blank to use loop unrolling
 gif ?=# Set to non-blank to enable gif output (still need to pass gif=filename.gif in argv)
@@ -38,9 +38,17 @@ ifneq ($(gif),)
 	PRINT_PREFIX += gif=y
 endif
 
-ifneq ($(shared),)
-    CFLAGS += -DFEAT_SHARED_MEM
-    PRINT_PREFIX += shared=y
+ifeq ($(kernel),default)
+	CFLAGS += -DFEAT_DEFAULT_IMPL
+	PRINT_PREFIX += kernel=default
+endif
+ifeq ($(kernel),shared)
+	CFLAGS += -DFEAT_SHARED_IMPL
+	PRINT_PREFIX += kernel=shared
+endif
+ifeq ($(kernel),fused)
+	CFLAGS += -DFEAT_FUSED_IMPL
+	PRINT_PREFIX += kernel=fused
 endif
 
 ifneq ($(unroll),)
