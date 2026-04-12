@@ -1,6 +1,7 @@
 # External parameters
 opt ?= 3# Optimization level
 impl ?= seq# Implementation (seq, omp, cuda)
+cuda_arch ?= native# CUDA target (native, v100s)
 size_w ?= 256# Width
 size_h ?= $(size_w)# Height (blank means equal to width)
 kernel_size ?= 26# Convolution kernel size
@@ -13,7 +14,7 @@ CC := nvcc
 # Compiler flags
 LDLIBS := -lm
 CFLAGS := \
-	-Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -Xcompiler --openmp,-Wall \
+	-Wno-deprecated-gpu-targets -Xcompiler --openmp,-Wall \
 	-O$(opt) -DFEAT_IMPL_$(shell echo $(impl) | tr a-z A-Z) \
 	-DFEAT_SIZE_W=$(size_w) -DFEAT_SIZE_H=$(size_h) \
 	-DFEAT_KERNEL_SIZE=$(kernel_size) -DFEAT_PRECISION=$(precision)
@@ -21,6 +22,13 @@ PRINT_PREFIX := \
 	opt=$(opt) impl=$(impl) \
 	size_w=$(size_w) size_h=$(size_h) \
 	kernel_size=$(kernel_size) precision=$(precision)
+
+ifeq ($(cuda_arch),native)
+	CFLAGS += -arch=native
+endif
+ifeq ($(cuda_arch),v100s)
+	CFLAGS += -gencode=arch=compute_70,code=sm_70
+endif
 
 ifneq ($(gif),)
 	CFLAGS += -DFEAT_GIF
