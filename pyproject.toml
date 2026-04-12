@@ -6,6 +6,7 @@ dependencies = [
     "jupyter>=1.1.1",
     "matplotlib>=3.10.8",
     "pandas>=3.0.1",
+    "scipy>=1.17.1",
     "seaborn>=0.13.2",
 ]
 
@@ -21,6 +22,14 @@ module-root = "src_python"
 
 [tool.ruff]
 src = ["src_python"]
+exclude = ["src_python/vzr_p2/lenia.py"]
 
 [tool.pyright]
 extraPaths = ["src_python"]
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    ".venv",
+    "src_python/vzr_p2/lenia.py",
+]
