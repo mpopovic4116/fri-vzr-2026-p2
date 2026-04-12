@@ -14,7 +14,7 @@ extern "C"
     struct lenia_impl_state *lenia_impl_init();
     void lenia_impl_upload(struct lenia_impl_state *state);
     void lenia_impl_step(struct lenia_impl_state *state, fhost dt);
-    void lenia_impl_dump(const struct lenia_impl_state *state, uint8_t *out_frame);
+    void lenia_impl_dump(struct lenia_impl_state *state, uint8_t *out_frame);
     void lenia_impl_download(struct lenia_impl_state *state);
     void lenia_impl_free(struct lenia_impl_state *state);
 

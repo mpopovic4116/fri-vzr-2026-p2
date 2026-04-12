@@ -129,7 +129,7 @@ void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
     }
 }
 
-void lenia_impl_dump(const struct lenia_impl_state *state, uint8_t *out_frame)
+void lenia_impl_dump(struct lenia_impl_state *state, uint8_t *out_frame)
 {
     for (unsigned int i = 0; i < ROWS; i++) {
         for (unsigned int j = 0; j < COLS; j++) {

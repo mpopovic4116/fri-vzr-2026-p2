@@ -6,6 +6,7 @@
 #include <cuda_runtime.h>
 
 #include "float_alias.h"
+#include "helper_cuda.h"
 #include "impl.h"
 #include "orbium.h"
 
@@ -76,8 +77,8 @@ struct lenia_impl_state *lenia_impl_init()
     state->w_host = (fhost *) calloc(FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE, sizeof(fhost));
     state->world_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
     state->tmp_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
-    cudaMalloc((void **) &state->world_device, state->grid_size);
-    cudaMalloc((void **) &state->tmp_device, state->grid_size);
+    checkCudaErrors(cudaMalloc((void **) &state->world_device, state->grid_size));
+    checkCudaErrors(cudaMalloc((void **) &state->tmp_device, state->grid_size));
 
     // Generate convolution kernel
     generate_kernel(state->w_host, FEAT_KERNEL_SIZE);
@@ -96,9 +97,9 @@ static __constant__ fcuda w_device_constant[FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE]
 void lenia_impl_upload(struct lenia_impl_state *state)
 {
     // copy mem host -> device
-    cudaMemcpy(state->world_device, state->world_host, state->grid_size, cudaMemcpyHostToDevice);
+    checkCudaErrors(cudaMemcpy(state->world_device, state->world_host, state->grid_size, cudaMemcpyHostToDevice));
     // cudaMemcpy(w_device, w_host, kernel_size_memory, cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol(w_device_constant, state->w_host, state->kernel_size_memory, 0, cudaMemcpyHostToDevice); // move kernel to constant memory
+    checkCudaErrors(cudaMemcpyToSymbol(w_device_constant, state->w_host, state->kernel_size_memory, 0, cudaMemcpyHostToDevice)); // move kernel to constant memory
 }
 
 // #define w(r, c) (w[(r) * w_cols + (c)])
@@ -157,9 +158,9 @@ void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
     update_kernel<<<state->numBlocks, state->threadsPerBlock>>>(state->world_device, state->tmp_device, ROWS, COLS, dt);
 }
 
-void lenia_impl_dump(const struct lenia_impl_state *state, uint8_t *out_frame)
+void lenia_impl_dump(struct lenia_impl_state *state, uint8_t *out_frame)
 {
-    cudaMemcpy(state->world_host, state->world_device, state->grid_size, cudaMemcpyDeviceToHost);
+    lenia_impl_download(state);
     for (unsigned int i = 0; i < ROWS * COLS; i++) {
         out_frame[i] = (uint8_t) (fmin(1.0, fmax(0.0, state->world_host[i])) * 255);
     }
@@ -167,15 +168,15 @@ void lenia_impl_dump(const struct lenia_impl_state *state, uint8_t *out_frame)
 
 void lenia_impl_download(struct lenia_impl_state *state)
 {
-    cudaMemcpy(state->world_host, state->world_device, state->grid_size, cudaMemcpyDeviceToHost);
+    checkCudaErrors(cudaMemcpy(state->world_host, state->world_device, state->grid_size, cudaMemcpyDeviceToHost));
 }
 
 void lenia_impl_free(struct lenia_impl_state *state)
 {
     free(state->w_host);
     free(state->world_host);
-    cudaFree(state->world_device);
+    checkCudaErrors(cudaFree(state->world_device));
     free(state->tmp_host);
-    cudaFree(state->tmp_device);
+    checkCudaErrors(cudaFree(state->tmp_device));
     free(state);
 }
