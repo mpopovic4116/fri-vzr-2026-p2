@@ -12,9 +12,6 @@
 #LOAD MODULES 
 module load CUDA
 
-#BUILD
-make
-
-#RUN
-srun ./lenia.out
+#BUILD AND RUN
+scripts/run.sh impl=cuda cuda_arch=v100s ./lenia.out
 
