@@ -6,6 +6,7 @@ size_w ?= 256# Width
 size_h ?= $(size_w)# Height (blank means equal to width)
 kernel_size ?= 26# Convolution kernel size
 precision ?= 64# Floating point precision, 64, 32 or 16 (16 is really slow on CPU because no native instructions)
+shared ?=# Set to non-blank to use shared memory conv kernel
 gif ?=# Set to non-blank to enable gif output (still need to pass gif=filename.gif in argv)
 
 # Compiler
@@ -33,6 +34,11 @@ endif
 ifneq ($(gif),)
 	CFLAGS += -DFEAT_GIF
 	PRINT_PREFIX += gif=y
+endif
+
+ifneq ($(shared),)
+    CFLAGS += -DUSE_SHARED_MEM
+    PRINT_PREFIX += shared=y
 endif
 
 CFLAGS += -DPRINT_PREFIX='"$(PRINT_PREFIX)"'
