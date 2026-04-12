@@ -15,6 +15,7 @@
 
 struct lenia_impl_state
 {
+    int pixels;
     int grid_size;
     int kernel_size_memory;
     dim3 threadsPerBlock;
@@ -24,6 +25,8 @@ struct lenia_impl_state
     fcuda *world_device;
     fhost *tmp_host;
     fcuda *tmp_device;
+    uint8_t *world_bytes_host;
+    uint8_t *world_bytes_device;
 };
 
 static fhost gauss(fhost x, fhost mu, fhost sigma)
@@ -70,6 +73,7 @@ struct lenia_impl_state *lenia_impl_init()
 
     // Allocate memory
     struct lenia_impl_state *state = (struct lenia_impl_state *) malloc(sizeof(struct lenia_impl_state));
+    state->pixels = ROWS * COLS;
     state->grid_size = ROWS * COLS * sizeof(fcuda);
     state->kernel_size_memory = FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE * sizeof(fcuda);
     state->threadsPerBlock = dim3(16, 16);
@@ -77,8 +81,10 @@ struct lenia_impl_state *lenia_impl_init()
     state->w_host = (fhost *) calloc(FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE, sizeof(fhost));
     state->world_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
     state->tmp_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
+    state->world_bytes_host = (uint8_t *) calloc(ROWS * COLS, sizeof(uint8_t));
     checkCudaErrors(cudaMalloc((void **) &state->world_device, state->grid_size));
     checkCudaErrors(cudaMalloc((void **) &state->tmp_device, state->grid_size));
+    checkCudaErrors(cudaMalloc((void **) &state->world_bytes_device, ROWS * COLS));
 
     // Generate convolution kernel
     generate_kernel(state->w_host, FEAT_KERNEL_SIZE);
@@ -116,7 +122,6 @@ static __global__ void conv_kernel(fcuda *result, fcuda *input, int rows, int co
 
     if (i < rows && j < cols) {
         fcuda sum = 0;
-        int r = k_size / 2;
 
         for (int ki = 0; ki < w_rows; ki++) {
             int kri = w_rows - ki - 1;
@@ -127,6 +132,20 @@ static __global__ void conv_kernel(fcuda *result, fcuda *input, int rows, int co
             }
         }
         result[i * cols + j] = sum;
+    }
+}
+
+static __global__ void byte_packing_kernel(uint8_t *dst, fcuda *src, int rows, int cols)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x < cols && y < rows) {
+        int idx = y * cols + x;
+        fcuda val = src[idx];
+        if (val < 0.0) val = 0.0;
+        if (val > 1.0) val = 1.0;
+        dst[idx] = (uint8_t) (val * 255.0f);
     }
 }
 
@@ -160,15 +179,14 @@ void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
 
 void lenia_impl_dump(struct lenia_impl_state *state, uint8_t *out_frame)
 {
-    lenia_impl_download(state);
-    for (unsigned int i = 0; i < ROWS * COLS; i++) {
-        out_frame[i] = (uint8_t) (fhost_fmin(1.0, fhost_fmax(0.0, state->world_host[i])) * 255);
-    }
+    byte_packing_kernel<<<state->numBlocks, state->threadsPerBlock>>>(state->world_bytes_device, state->world_device, ROWS, COLS);
+    checkCudaErrors(cudaMemcpy(out_frame, state->world_bytes_device, state->pixels, cudaMemcpyDeviceToHost));
 }
 
 void lenia_impl_download(struct lenia_impl_state *state)
 {
-    checkCudaErrors(cudaMemcpy(state->world_host, state->world_device, state->grid_size, cudaMemcpyDeviceToHost));
+    byte_packing_kernel<<<state->numBlocks, state->threadsPerBlock>>>(state->world_bytes_device, state->world_device, ROWS, COLS);
+    checkCudaErrors(cudaMemcpy(state->world_bytes_host, state->world_bytes_device, state->pixels, cudaMemcpyDeviceToHost));
 }
 
 void lenia_impl_free(struct lenia_impl_state *state)
@@ -178,5 +196,7 @@ void lenia_impl_free(struct lenia_impl_state *state)
     checkCudaErrors(cudaFree(state->world_device));
     free(state->tmp_host);
     checkCudaErrors(cudaFree(state->tmp_device));
+    free(state->world_bytes_host);
+    checkCudaErrors(cudaFree(state->world_bytes_device));
     free(state);
 }
