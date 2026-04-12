@@ -123,7 +123,7 @@ void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
         for (unsigned int i = 0; i < ROWS; i++) {
             for (unsigned int j = 0; j < COLS; j++) {
                 state->world[i * ROWS + j] += dt * growth_lenia(state->tmp[i * ROWS + j]);
-                state->world[i * ROWS + j] = fmin(1, fmax(0, state->world[i * ROWS + j])); // Clip between 0 and 1
+                state->world[i * ROWS + j] = fhost_fmin(1, fhost_fmax(0, state->world[i * ROWS + j])); // Clip between 0 and 1
             }
         }
     }

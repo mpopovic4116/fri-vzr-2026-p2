@@ -148,7 +148,7 @@ static __global__ void update_kernel(fcuda *world, fcuda *tmp, int rows, int col
         fcuda u = tmp[idx];
         fcuda growth = -1.0 + 2.0 * gauss_device(u, mu, sigma);
         fcuda val = world[idx] + dt * growth;
-        world[idx] = fmin(1.0, fmax(0.0, val));
+        world[idx] = fcuda_fmin(1.0, fcuda_fmax(0.0, val));
     }
 }
 
@@ -162,7 +162,7 @@ void lenia_impl_dump(struct lenia_impl_state *state, uint8_t *out_frame)
 {
     lenia_impl_download(state);
     for (unsigned int i = 0; i < ROWS * COLS; i++) {
-        out_frame[i] = (uint8_t) (fmin(1.0, fmax(0.0, state->world_host[i])) * 255);
+        out_frame[i] = (uint8_t) (fhost_fmin(1.0, fhost_fmax(0.0, state->world_host[i])) * 255);
     }
 }
 
