@@ -139,6 +139,7 @@ int main(int argc, char **argv)
         }
 #endif
     }
+    cudaDeviceSynchronize();
     double t_steps = omp_get_wtime();
     lenia_impl_download(state);
     double t_download = omp_get_wtime();
