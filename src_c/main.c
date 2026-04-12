@@ -149,7 +149,7 @@ int main(int argc, char **argv)
     double t_free = omp_get_wtime();
 
     printf("%s steps=%d dt=%0.3lf "
-           "t_init=%0.15lf t_upload=%0.15lf t_steps=%0.15lf t_download=%0.15lf t_free=%0.15lf t_total=%0.15lf\n",
+           "t_init=%0.15lf t_upload=%0.15lf t_steps=%0.15lf t_download=%0.15lf t_free=%0.15lf t_work_total=%0.15lf t_total=%0.15lf\n",
            PRINT_PREFIX,
            steps,
            dt,
@@ -158,6 +158,7 @@ int main(int argc, char **argv)
            t_steps - t_upload,
            t_download - t_steps,
            t_free - t_download,
+           t_download - t_init,
            t_free - t_start);
 
     return 0;
