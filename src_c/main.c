@@ -8,6 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef FEAT_IMPL_CUDA
+#include <cuda_runtime.h>
+#endif
+
 #include "impl.h"
 
 #ifdef FEAT_GIF
@@ -139,7 +143,9 @@ int main(int argc, char **argv)
         }
 #endif
     }
+#ifdef FEAT_IMPL_CUDA
     cudaDeviceSynchronize();
+#endif
     double t_steps = omp_get_wtime();
     lenia_impl_download(state);
     double t_download = omp_get_wtime();
