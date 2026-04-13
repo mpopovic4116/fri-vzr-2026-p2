@@ -7,8 +7,10 @@ size_h ?= $(size_w)# Height (blank means equal to width)
 kernel_size ?= 26# Convolution kernel size
 precision ?= 64# Floating point precision, 64, 32 or 16 (16 is really slow on CPU because no native instructions)
 kernel ?= default# kernel implementation (default, shared, fused)
-toroid= ?= bitwise# toroidal wrap with: (mod, bitwise)
+toroid ?= bitwise# toroidal wrap with: (mod, bitwise)
 unroll ?=# Set to non-blank to use loop unrolling
+threads_x ?= 32# number of threads for x dim.
+threads_y ?= $(threads_x)# number of threads for y dim (blank means equal to threads_x).
 gif ?=# Set to non-blank to enable gif output (still need to pass gif=filename.gif in argv)
 
 # Compiler
@@ -20,11 +22,12 @@ CFLAGS := \
 	-Wno-deprecated-gpu-targets -Xcompiler --openmp,-Wall \
 	-O$(opt) -DFEAT_IMPL_$(shell echo $(impl) | tr a-z A-Z) \
 	-DFEAT_SIZE_W=$(size_w) -DFEAT_SIZE_H=$(size_h) \
-	-DFEAT_KERNEL_SIZE=$(kernel_size) -DFEAT_PRECISION=$(precision)
+	-DFEAT_KERNEL_SIZE=$(kernel_size) -DFEAT_PRECISION=$(precision) \
+	-DFEAT_THREAD_X=$(threads_x) -DFEAT_THREAD_Y=$(threads_y)
 PRINT_PREFIX := \
 	opt=$(opt) impl=$(impl) \
 	size_w=$(size_w) size_h=$(size_h) \
-	kernel_size=$(kernel_size) precision=$(precision)
+	kernel_size=$(kernel_size) precision=$(precision) threads=$(threads_x)x$(threads_y)
 
 ifeq ($(cuda_arch),native)
 	CFLAGS += -arch=native

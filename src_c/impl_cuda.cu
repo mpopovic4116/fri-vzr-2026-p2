@@ -13,8 +13,8 @@
 #define ROWS FEAT_SIZE_H
 #define COLS FEAT_SIZE_W
 
-#define TILE_W 32
-#define TILE_H 32
+// #define FEAT_THREAD_X 32
+// #define FEAT_THREAD_Y 32
 
 struct lenia_impl_state
 {
@@ -80,9 +80,9 @@ struct lenia_impl_state *lenia_impl_init()
     state->pixels = ROWS * COLS;
     state->grid_size = ROWS * COLS * sizeof(fcuda);
     state->kernel_size_memory = FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE * sizeof(fcuda);
-    state->threadsPerBlock = dim3(TILE_W, TILE_H);
-    state->local_memory_size = (TILE_W + FEAT_KERNEL_SIZE) * (TILE_W + FEAT_KERNEL_SIZE) * sizeof(fcuda);
-    state->numBlocks = dim3((COLS + TILE_W - 1) / TILE_W, (ROWS + TILE_H - 1) / TILE_H);
+    state->threadsPerBlock = dim3(FEAT_THREAD_X, FEAT_THREAD_Y);
+    state->local_memory_size = (FEAT_THREAD_X + FEAT_KERNEL_SIZE) * (FEAT_THREAD_X + FEAT_KERNEL_SIZE) * sizeof(fcuda);
+    state->numBlocks = dim3((COLS + FEAT_THREAD_X - 1) / FEAT_THREAD_X, (ROWS + FEAT_THREAD_Y - 1) / FEAT_THREAD_Y);
     state->w_host = (fhost *) calloc(FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE, sizeof(fhost));
     state->world_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
     state->tmp_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
@@ -147,33 +147,33 @@ static __global__ void conv_kernel_shared(fcuda *result, fcuda *input, int rows,
 {
     extern __shared__ fcuda tile[];
 
-    int x = blockIdx.x * TILE_W + threadIdx.x;
-    int y = blockIdx.y * TILE_H + threadIdx.y;
+    int x = blockIdx.x * FEAT_THREAD_X + threadIdx.x;
+    int y = blockIdx.y * FEAT_THREAD_Y + threadIdx.y;
 
     int r = k_size / 2;
-    int shared_w = TILE_W + k_size;
+    int shared_w = FEAT_THREAD_X + k_size;
 
     // load tile and halo into local mem
-    for (int j = threadIdx.y; j < shared_w; j += TILE_H) {
-        // blockIdx.x * TILE_W <- find ur tile
-        // - r <- halo on one side, int shared_w = TILE_W + k_size; <- k_size is 2r, so here we get the other side of the halo
+    for (int j = threadIdx.y; j < shared_w; j += FEAT_THREAD_Y) {
+        // blockIdx.x * FEAT_THREAD_X <- find ur tile
+        // - r <- halo on one side, int shared_w = FEAT_THREAD_X + k_size; <- k_size is 2r, so here we get the other side of the halo
         // + i / + j <- increment in dir
         // + cols / + rows <- so we dont mod a neg num
 #ifdef FEAT_BITWISE_MASK
         // bitwise toroidal wrap (should work as long as cols and rows is a power of 2)
-        int global_y = (blockIdx.y * TILE_H - r + j + rows) & (rows - 1);
+        int global_y = (blockIdx.y * FEAT_THREAD_Y - r + j + rows) & (rows - 1);
 #else
         // toroidal wrap with %
-        int global_y = (blockIdx.y * TILE_H - r + j + rows) % rows;
+        int global_y = (blockIdx.y * FEAT_THREAD_Y - r + j + rows) % rows;
 #endif
 
-        for (int i = threadIdx.x; i < shared_w; i += TILE_W) {
+        for (int i = threadIdx.x; i < shared_w; i += FEAT_THREAD_X) {
 #ifdef FEAT_BITWISE_MASK
             // bitwise toroidal wrap (should work as long as cols and rows is a power of 2)
-            int global_x = (blockIdx.x * TILE_W - r + i + cols) & (cols - 1);
+            int global_x = (blockIdx.x * FEAT_THREAD_X - r + i + cols) & (cols - 1);
 #else
             // toroidal wrap with %
-            int global_x = (blockIdx.x * TILE_W - r + i + cols) % cols;
+            int global_x = (blockIdx.x * FEAT_THREAD_X - r + i + cols) % cols;
 #endif
 
             tile[j * shared_w + i] = input[global_y * cols + global_x];
@@ -207,28 +207,28 @@ static __global__ void lenia_fused_kernel(fcuda *out_world, fcuda *in_world, int
 {
     extern __shared__ fcuda tile[];
 
-    int x = blockIdx.x * TILE_W + threadIdx.x;
-    int y = blockIdx.y * TILE_H + threadIdx.y;
+    int x = blockIdx.x * FEAT_THREAD_X + threadIdx.x;
+    int y = blockIdx.y * FEAT_THREAD_Y + threadIdx.y;
 
     int r = k_size / 2;
-    int shared_w = TILE_W + k_size;
+    int shared_w = FEAT_THREAD_X + k_size;
 
     const fcuda mu = 0.15;
     const fcuda sigma = 0.015;
 
     // load tile and halo into local mem, same code chunk as in function `conv_kernel_shared`, go check that for comments if needed
-    for (int j = threadIdx.y; j < shared_w; j += TILE_H) {
+    for (int j = threadIdx.y; j < shared_w; j += FEAT_THREAD_Y) {
 #ifdef FEAT_BITWISE_MASK
-        int global_y = (blockIdx.y * TILE_H - r + j + rows) & (rows - 1);
+        int global_y = (blockIdx.y * FEAT_THREAD_Y - r + j + rows) & (rows - 1);
 #else
-        int global_y = (blockIdx.y * TILE_H - r + j + rows) % rows;
+        int global_y = (blockIdx.y * FEAT_THREAD_Y - r + j + rows) % rows;
 #endif
 
-        for (int i = threadIdx.x; i < shared_w; i += TILE_W) {
+        for (int i = threadIdx.x; i < shared_w; i += FEAT_THREAD_X) {
 #ifdef FEAT_BITWISE_MASK
-            int global_x = (blockIdx.x * TILE_W - r + i + cols) & (cols - 1);
+            int global_x = (blockIdx.x * FEAT_THREAD_X - r + i + cols) & (cols - 1);
 #else
-            int global_x = (blockIdx.x * TILE_W - r + i + cols) % cols;
+            int global_x = (blockIdx.x * FEAT_THREAD_X - r + i + cols) % cols;
 #endif
 
             tile[j * shared_w + i] = in_world[global_y * cols + global_x];
