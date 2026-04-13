@@ -12,6 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
+gif_comparator = "vzr_p2.gif_comparator:main"
 kvmean = "vzr_p2.kv_utils:main_kvmean"
 
 [build-system]
