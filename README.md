@@ -8,7 +8,7 @@ The same `k=v` pairs should be passed to the executable itself.
 The script `scripts/run.sh` will run `scripts/make.sh` and then run the final executable with the same args.
 Prefer this for interactive use.
 
-To generate `compile_commands.json`, run `bear -- make clean all` (possibly passing additional flags to select alternate implementations and whatnot).
+To generate `compile_commands.json`, run `bear -- make clean_single all` (possibly passing additional flags to select alternate implementations and whatnot).
 
 # Implementations
 
