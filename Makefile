@@ -15,12 +15,14 @@ threads_y ?= $(threads_x)# number of threads for y dim (blank means equal to thr
 gif ?=# Set to non-blank to enable gif output (still need to pass gif=filename.gif in argv)
 
 # Compiler
-CC := nvcc
+CC := gcc
+NVCC := nvcc
 
 # Compiler flags
 LDLIBS := -lm
+CCFLAGS := --openmp -Wall -std=gnu11
+NVCCFLAGS := -Wno-deprecated-gpu-targets -Xcompiler --openmp,-Wall
 CFLAGS := \
-	-Wno-deprecated-gpu-targets -Xcompiler --openmp,-Wall \
 	-O$(opt) -DFEAT_IMPL_$(shell echo $(impl) | tr a-z A-Z) \
 	-DFEAT_SIZE_W=$(size_w) -DFEAT_SIZE_H=$(size_h) \
 	-DFEAT_KERNEL_SIZE=$(kernel_size) -DFEAT_PRECISION=$(precision) \
@@ -54,10 +56,10 @@ endif
 endif
 
 ifeq ($(cuda_arch),native)
-	CFLAGS += -arch=native
+	NVCCFLAGS += -arch=native
 endif
 ifeq ($(cuda_arch),v100s)
-	CFLAGS += -gencode=arch=compute_70,code=sm_70
+	NVCCFLAGS += -gencode=arch=compute_70,code=sm_70
 endif
 
 ifeq ($(impl),cuda)
@@ -99,7 +101,7 @@ CFLAGS += -DPRINT_PREFIX='"$(PRINT_PREFIX)"'
 # File locations
 SRC := src_c
 DST_DIR := build
-DST := $(DST_DIR)/$(shell printf '%s\0' $(CFLAGS) $(LDFLAGS) | md5sum | awk '{ print $$1 }')
+DST := $(DST_DIR)/$(shell printf '%s\0' $(CCFLAGS) $(NVCCFLAGS) $(CFLAGS) $(LDFLAGS) | md5sum | awk '{ print $$1 }')
 
 # Source files
 SRCS := $(SRC)/main.c $(SRC)/orbium.c
@@ -134,13 +136,13 @@ printexe3: $(TARGET)
 	@echo $^ >&3
 
 $(TARGET): $(OBJS) | $(DST)
-	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
+	$(NVCC) $(NVCCFLAGS) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
 $(DST)/%.o: $(SRC)/%.cu | $(DST)
-	$(CC) $(CFLAGS) -MD -MP -c -o $@ $<
+	$(NVCC) $(NVCCFLAGS) $(CFLAGS) -MD -MP -c -o $@ $<
 
 $(DST)/%.o: $(SRC)/%.c | $(DST)
-	$(CC) $(CFLAGS) -MD -MP -c -o $@ $<
+	$(CC) $(CCFLAGS) $(CFLAGS) -MD -MP -c -o $@ $<
 
 $(DST):
 	@mkdir -p $@
