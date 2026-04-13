@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "float_alias.h"
 #include "impl.h"
@@ -116,6 +117,9 @@ static void kernel_universal(const fhost *restrict w, const fhost *restrict inpu
         int iy = (y - KRNL / 2 + ROWS + ky) % ROWS;
         const fhost *w_row = &w[ky * KRNL];
         const fhost *input_row = &input[iy * PCOLS];
+#ifdef FEAT_SIMD
+#pragma omp simd reduction(+ : sum)
+#endif
         for (int kx = 0; kx < KRNL; kx++) {
             int ix = (x - KRNL / 2 + COLS + kx) % COLS;
             sum += w_row[kx] * input_row[ix];
@@ -134,6 +138,9 @@ static void kernel_inner(const fhost *restrict w, const fhost *restrict input, f
         int iy = y - KRNL / 2 + ky;
         const fhost *w_row = &w[ky * KRNL];
         const fhost *input_row = &input[iy * PCOLS];
+#ifdef FEAT_SIMD
+#pragma omp simd reduction(+ : sum)
+#endif
         for (int kx = 0; kx < KRNL; kx++) {
             int ix = x - KRNL / 2 + kx;
             sum += w_row[kx] * input_row[ix];
@@ -168,7 +175,7 @@ void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
         }
 #elif defined(FEAT_TOROID_IMPL_SECTIONS)
 #ifdef FEAT_IMPL_OMP
-#pragma omp for collapse(2)
+#pragma omp for collapse(2) nowait
 #endif
         for (unsigned int y = 0; y < KRNL - 1; y++) { // Top + bottom (including corners)
             for (unsigned int x = 0; x < COLS; x++) {
@@ -178,7 +185,7 @@ void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
         }
 
 #ifdef FEAT_IMPL_OMP
-#pragma omp for collapse(2)
+#pragma omp for collapse(2) nowait
 #endif
         for (unsigned int y = KRNL - 1; y < ROWS - (KRNL - 1); y++) { // Left + right
             for (unsigned int x = 0; x < KRNL - 1; x++) {
@@ -197,33 +204,20 @@ void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
         }
 #elif defined(FEAT_TOROID_IMPL_HALO)
 #ifdef FEAT_IMPL_OMP
-#pragma omp for collapse(2)
+#pragma omp for nowait
 #endif
         for (int y = 0; y < PADDING; y++) { // Top + bottom (including corners)
-            int dst_top = y * PCOLS;
-            int dst_bot = (PADDING + ROWS + y) * PCOLS;
-            int src_top = (PADDING + ((y - PADDING + ROWS) % ROWS)) * PCOLS;
-            int src_bot = (PADDING + (y % ROWS)) * PCOLS;
-
-            for (int x = 0; x < PCOLS; x++) {
-                int src_x = PADDING + ((x - PADDING + COLS) % COLS);
-                input[dst_top + x] = input[src_top + src_x];
-                input[dst_bot + x] = input[src_bot + src_x];
-            }
+            memcpy(input + y * PCOLS, input + (ROWS + y) * PCOLS, PCOLS * sizeof(*input));
+            memcpy(input + (PADDING + ROWS + y) * PCOLS, input + (PADDING + y) * PCOLS, PCOLS * sizeof(*input));
         }
 
 #ifdef FEAT_IMPL_OMP
-#pragma omp for collapse(2)
+#pragma omp for
 #endif
         for (int y = 0; y < ROWS; y++) { // Left + right
-            int row = (PADDING + y) * PCOLS;
-            for (int x = 0; x < PADDING; x++) {
-                int src_left = PADDING + ((x - PADDING + COLS) % COLS);
-                int src_right = PADDING + (x % COLS);
-
-                input[row + x] = input[row + src_left];
-                input[row + (PADDING + COLS + x)] = input[row + src_right];
-            }
+            fhost *row = &input[(PADDING + y) * PCOLS];
+            memcpy(row, row + COLS, PADDING * sizeof(fhost));
+            memcpy(row + PADDING + COLS, row + PADDING, PADDING * sizeof(fhost));
         }
 
 #ifdef FEAT_IMPL_OMP

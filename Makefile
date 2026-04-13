@@ -6,6 +6,7 @@ size_w ?= 256# Width
 size_h ?= $(size_w)# Height (blank means equal to width)
 kernel_size ?= 26# Convolution kernel size
 precision ?= 64# Floating point precision, 64, 32 or 16 (16 is really slow on CPU because no native instructions)
+simd ?= y# Explicitly vectorize some loops, even in impl=seq
 toroid_impl ?= halo# Alternate ways of implementing wrapping, CPU only for now (naive, sections, halo)
 kernel ?= default# kernel implementation (default, shared, fused)
 toroid ?= bitwise# toroidal wrap with: (mod, bitwise)
@@ -41,6 +42,11 @@ ifeq ($(impl),omp)
 endif
 
 ifeq ($(IS_CPU),y)
+ifneq ($(simd),)
+	CFLAGS += -DFEAT_SIMD
+	PRINT_PREFIX += simd=y
+endif
+
 ifeq ($(toroid_impl),naive)
 	CFLAGS += -DFEAT_TOROID_IMPL_NAIVE
 	PRINT_PREFIX += toroid_impl=naive
