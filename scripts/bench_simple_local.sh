@@ -7,7 +7,7 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/..
 
 run_bench() {
     cmd=$(scripts/make.sh "${@:2}")
-    for i in $(seq -- "$1"); do
+    for _i in $(seq -- "$1"); do
         "$cmd" "${@:2}"
     done
 }
