@@ -152,9 +152,10 @@ static __global__ void conv_kernel_shared(fcuda *result, fcuda *input, int rows,
 
     int r = k_size / 2;
     int shared_w = FEAT_THREAD_X + k_size;
+    int shared_h = FEAT_THREAD_Y + k_size;
 
     // load tile and halo into local mem
-    for (int j = threadIdx.y; j < shared_w; j += FEAT_THREAD_Y) {
+    for (int j = threadIdx.y; j < shared_h; j += FEAT_THREAD_Y) {
         // blockIdx.x * FEAT_THREAD_X <- find ur tile
         // - r <- halo on one side, int shared_w = FEAT_THREAD_X + k_size; <- k_size is 2r, so here we get the other side of the halo
         // + i / + j <- increment in dir
