@@ -109,14 +109,16 @@ static fhost growth_lenia(fhost u)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 
-static void kernel_universal(const fhost *w, const fhost *input, fhost *output, int x, int y, fhost dt)
+static void kernel_universal(const fhost *restrict w, const fhost *restrict input, fhost *restrict output, int x, int y, fhost dt)
 {
     fhost sum = 0;
     for (int ky = 0; ky < KRNL; ky++) {
         int iy = (y - KRNL / 2 + ROWS + ky) % ROWS;
+        const fhost *w_row = &w[ky * KRNL];
+        const fhost *input_row = &input[iy * PCOLS];
         for (int kx = 0; kx < KRNL; kx++) {
             int ix = (x - KRNL / 2 + COLS + kx) % COLS;
-            sum += w[ky * KRNL + kx] * input[iy * COLS + ix];
+            sum += w_row[kx] * input_row[ix];
         }
     }
     fhost val = input[y * PCOLS + x];
@@ -125,14 +127,16 @@ static void kernel_universal(const fhost *w, const fhost *input, fhost *output, 
     output[y * PCOLS + x] = val;
 }
 
-static void kernel_inner(const fhost *w, const fhost *input, fhost *output, int x, int y, fhost dt)
+static void kernel_inner(const fhost *restrict w, const fhost *restrict input, fhost *restrict output, int x, int y, fhost dt)
 {
     fhost sum = 0;
     for (int ky = 0; ky < KRNL; ky++) {
         int iy = y - KRNL / 2 + ky;
+        const fhost *w_row = &w[ky * KRNL];
+        const fhost *input_row = &input[iy * PCOLS];
         for (int kx = 0; kx < KRNL; kx++) {
             int ix = x - KRNL / 2 + kx;
-            sum += w[ky * KRNL + kx] * input[iy * PCOLS + ix];
+            sum += w_row[kx] * input_row[ix];
         }
     }
     fhost val = input[y * PCOLS + x];
@@ -145,9 +149,9 @@ static void kernel_inner(const fhost *w, const fhost *input, fhost *output, int 
 
 void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
 {
-    fhost *w = state->w;
-    fhost *input = state->world;
-    fhost *output = state->tmp;
+    fhost *restrict w = state->w;
+    fhost *restrict input = state->world;
+    fhost *restrict output = state->tmp;
 
 #ifdef FEAT_IMPL_OMP
 #pragma omp parallel
