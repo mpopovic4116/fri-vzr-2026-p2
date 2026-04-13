@@ -8,6 +8,17 @@
 
 #define ROWS FEAT_SIZE_H
 #define COLS FEAT_SIZE_W
+#define KRNL FEAT_KERNEL_SIZE
+
+#ifdef FEAT_TOROID_IMPL_HALO
+#define PADDING (KRNL - 1)
+#define PROWS (ROWS + PADDING * 2)
+#define PCOLS (COLS + PADDING * 2)
+#else
+#define PADDING 0
+#define PROWS ROWS
+#define PCOLS COLS
+#endif
 
 struct lenia_impl_state
 {
@@ -18,7 +29,8 @@ struct lenia_impl_state
 
 static fhost gauss(fhost x, fhost mu, fhost sigma)
 {
-    return exp(-0.5 * pow((x - mu) / sigma, 2));
+    fhost z = (x - mu) / sigma;
+    return exp(-0.5 * z * z);
 }
 
 static void generate_kernel(fhost *K, const unsigned int size)
@@ -28,22 +40,30 @@ static void generate_kernel(fhost *K, const unsigned int size)
     fhost sigma = 0.15;
     int r = size / 2;
     fhost sum = 0;
-    if (K != NULL) {
-        for (int y = -r; y < r; y++) {
-            for (int x = -r; x < r; x++) {
-                fhost distance = sqrt((1 + x) * (1 + x) + (1 + y) * (1 + y)) / r;
-                K[(y + r) * size + x + r] = gauss(distance, mu, sigma);
-                if (distance > 1) {
-                    K[(y + r) * size + x + r] = 0; // Cut at d=1
-                }
-                sum += K[(y + r) * size + x + r];
+    for (int y = -r; y < r; y++) {
+        for (int x = -r; x < r; x++) {
+            fhost distance = sqrt((1 + x) * (1 + x) + (1 + y) * (1 + y)) / r;
+            K[(y + r) * size + x + r] = gauss(distance, mu, sigma);
+            if (distance > 1) {
+                K[(y + r) * size + x + r] = 0; // Cut at d=1
             }
+            sum += K[(y + r) * size + x + r];
         }
-        // Normalize
-        for (unsigned int y = 0; y < size; y++) {
-            for (unsigned int x = 0; x < size; x++) {
-                K[y * size + x] /= sum;
-            }
+    }
+    // Normalize
+    for (unsigned int y = 0; y < size; y++) {
+        for (unsigned int x = 0; x < size; x++) {
+            K[y * size + x] /= sum;
+        }
+    }
+    // Rotate 180 degrees for consistency with reference implementation (our step does correlation instead of convolution)
+    for (unsigned int y = 0; y < size; y++) {
+        unsigned int y_other = size - 1 - y;
+        for (unsigned int x = 0; x < size - y; x++) {
+            unsigned int x_other = size - 1 - x;
+            fhost other = K[y_other * size + x_other];
+            K[y_other * size + x_other] = K[y * size + x];
+            K[y * size + x] = other;
         }
     }
 }
@@ -59,46 +79,23 @@ struct lenia_impl_state *lenia_impl_init()
 {
     // Allocate memory
     struct lenia_impl_state *state = (struct lenia_impl_state *) malloc(sizeof(struct lenia_impl_state));
-    state->w = (fhost *) calloc(FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE, sizeof(fhost));
-    state->world = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
-    state->tmp = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
+    state->w = (fhost *) calloc(KRNL * KRNL, sizeof(fhost));
+    state->world = (fhost *) calloc(PROWS * PCOLS, sizeof(fhost));
+    state->tmp = (fhost *) calloc(PROWS * PCOLS, sizeof(fhost));
 
     // Generate convolution kernel
-    generate_kernel(state->w, FEAT_KERNEL_SIZE);
+    generate_kernel(state->w, KRNL);
 
     // Place orbiums
     struct orbium_coo orbiums[] = {{0, COLS / 3, 0}, {ROWS / 3, 0, 180}};
     for (unsigned int o = 0; o < sizeof(orbiums) / sizeof(*orbiums); o++) {
-        place_orbium(state->world, ROWS, COLS, orbiums[o].row, orbiums[o].col, orbiums[o].angle);
+        place_orbium(state->world, PROWS, PCOLS, PADDING + orbiums[o].row, PADDING + orbiums[o].col, orbiums[o].angle);
     }
 
     return state;
 }
 
 void lenia_impl_upload(struct lenia_impl_state *state) {} // No-op for cpu
-
-#define w(r, c) (w[(r) * w_cols + (c)])
-#define input(r, c) (input[((r) % rows) * cols + ((c) % cols)])
-
-// Function to perform convolution on input using kernel w
-// Note that the kernel is flipped for convolution as per definition, and we use modular indexing for toroidal world
-static void convolve2d(fhost *result, const fhost *input, const fhost *w, const unsigned int rows, const unsigned int cols, const unsigned int w_rows, const unsigned int w_cols)
-{
-#ifdef FEAT_IMPL_OMP
-#pragma omp for
-#endif
-    for (unsigned int i = 0; i < rows; i++) {
-        for (unsigned int j = 0; j < cols; j++) {
-            fhost sum = 0;
-            for (int ki = w_rows - 1, kri = 0; ki >= 0; ki--, kri++) {
-                for (int kj = w_cols - 1, kcj = 0; kj >= 0; kj--, kcj++) {
-                    sum += w(ki, kj) * input((i - w_rows / 2 + rows + kri), (j - w_cols / 2 + cols + kcj));
-                }
-            }
-            result[i * cols + j] = sum;
-        }
-    }
-}
 
 static fhost growth_lenia(fhost u)
 {
@@ -107,33 +104,144 @@ static fhost growth_lenia(fhost u)
     return -1 + 2 * gauss(u, mu, sigma); // Baseline -1, peak +1
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
+static void kernel_universal(const fhost *w, const fhost *input, fhost *output, int x, int y, fhost dt)
+{
+    fhost sum = 0;
+    for (int ky = 0; ky < KRNL; ky++) {
+        int iy = (y - KRNL / 2 + ROWS + ky) % ROWS;
+        for (int kx = 0; kx < KRNL; kx++) {
+            int ix = (x - KRNL / 2 + COLS + kx) % COLS;
+            sum += w[ky * KRNL + kx] * input[iy * COLS + ix];
+        }
+    }
+    fhost val = input[y * PCOLS + x];
+    val += dt * growth_lenia(sum);
+    val = fhost_fmin(1, fhost_fmax(0, val));
+    output[y * PCOLS + x] = val;
+}
+
+static void kernel_inner(const fhost *w, const fhost *input, fhost *output, int x, int y, fhost dt)
+{
+    fhost sum = 0;
+    for (int ky = 0; ky < KRNL; ky++) {
+        int iy = y - KRNL / 2 + ky;
+        for (int kx = 0; kx < KRNL; kx++) {
+            int ix = x - KRNL / 2 + kx;
+            sum += w[ky * KRNL + kx] * input[iy * PCOLS + ix];
+        }
+    }
+    fhost val = input[y * PCOLS + x];
+    val += dt * growth_lenia(sum);
+    val = fhost_fmin(1, fhost_fmax(0, val));
+    output[y * PCOLS + x] = val;
+}
+
+#pragma GCC diagnostic pop
+
 void lenia_impl_step(struct lenia_impl_state *state, fhost dt)
 {
+    fhost *w = state->w;
+    fhost *input = state->world;
+    fhost *output = state->tmp;
+
 #ifdef FEAT_IMPL_OMP
 #pragma omp parallel
 #endif
     {
-        // Convolution
-        convolve2d(state->tmp, state->world, state->w, ROWS, COLS, FEAT_KERNEL_SIZE, FEAT_KERNEL_SIZE);
-
-        // Evolution
+#if defined(FEAT_TOROID_IMPL_NAIVE)
 #ifdef FEAT_IMPL_OMP
-#pragma omp for
+#pragma omp for collapse(2)
 #endif
-        for (unsigned int i = 0; i < ROWS; i++) {
-            for (unsigned int j = 0; j < COLS; j++) {
-                state->world[i * ROWS + j] += dt * growth_lenia(state->tmp[i * ROWS + j]);
-                state->world[i * ROWS + j] = fhost_fmin(1, fhost_fmax(0, state->world[i * ROWS + j])); // Clip between 0 and 1
+        for (unsigned int y = 0; y < ROWS; y++) {
+            for (unsigned int x = 0; x < COLS; x++) {
+                kernel_universal(w, input, output, x, y, dt);
             }
         }
+#elif defined(FEAT_TOROID_IMPL_SECTIONS)
+#ifdef FEAT_IMPL_OMP
+#pragma omp for collapse(2)
+#endif
+        for (unsigned int y = 0; y < KRNL - 1; y++) { // Top + bottom (including corners)
+            for (unsigned int x = 0; x < COLS; x++) {
+                kernel_universal(w, input, output, x, y, dt);
+                kernel_universal(w, input, output, x, ROWS - (KRNL - 1) + y, dt);
+            }
+        }
+
+#ifdef FEAT_IMPL_OMP
+#pragma omp for collapse(2)
+#endif
+        for (unsigned int y = KRNL - 1; y < ROWS - (KRNL - 1); y++) { // Left + right
+            for (unsigned int x = 0; x < KRNL - 1; x++) {
+                kernel_universal(w, input, output, x, y, dt);
+                kernel_universal(w, input, output, COLS - (KRNL - 1) + x, y, dt);
+            }
+        }
+
+#ifdef FEAT_IMPL_OMP
+#pragma omp for collapse(2)
+#endif
+        for (unsigned int y = KRNL - 1; y < ROWS - (KRNL - 1); y++) { // Inner
+            for (unsigned int x = KRNL - 1; x < COLS - (KRNL - 1); x++) {
+                kernel_inner(w, input, output, x, y, dt);
+            }
+        }
+#elif defined(FEAT_TOROID_IMPL_HALO)
+#ifdef FEAT_IMPL_OMP
+#pragma omp for collapse(2)
+#endif
+        for (int y = 0; y < PADDING; y++) { // Top + bottom (including corners)
+            int dst_top = y * PCOLS;
+            int dst_bot = (PADDING + ROWS + y) * PCOLS;
+            int src_top = (PADDING + ((y - PADDING + ROWS) % ROWS)) * PCOLS;
+            int src_bot = (PADDING + (y % ROWS)) * PCOLS;
+
+            for (int x = 0; x < PCOLS; x++) {
+                int src_x = PADDING + ((x - PADDING + COLS) % COLS);
+                input[dst_top + x] = input[src_top + src_x];
+                input[dst_bot + x] = input[src_bot + src_x];
+            }
+        }
+
+#ifdef FEAT_IMPL_OMP
+#pragma omp for collapse(2)
+#endif
+        for (int y = 0; y < ROWS; y++) { // Left + right
+            int row = (PADDING + y) * PCOLS;
+            for (int x = 0; x < PADDING; x++) {
+                int src_left = PADDING + ((x - PADDING + COLS) % COLS);
+                int src_right = PADDING + (x % COLS);
+
+                input[row + x] = input[row + src_left];
+                input[row + (PADDING + COLS + x)] = input[row + src_right];
+            }
+        }
+
+#ifdef FEAT_IMPL_OMP
+#pragma omp for collapse(2)
+#endif
+        for (unsigned int y = PADDING; y < PROWS - PADDING; y++) {
+            for (unsigned int x = PADDING; x < PCOLS - PADDING; x++) {
+                kernel_inner(w, input, output, x, y, dt);
+            }
+        }
+#else
+#error No toroid wrapping method defined
+#endif
     }
+
+    state->world = output;
+    state->tmp = input;
 }
 
 void lenia_impl_dump(struct lenia_impl_state *state, uint8_t *out_frame)
 {
-    for (unsigned int i = 0; i < ROWS; i++) {
-        for (unsigned int j = 0; j < COLS; j++) {
-            out_frame[i * ROWS + j] = state->world[i * ROWS + j] * 255;
+    for (unsigned int y = 0; y < ROWS; y++) {
+        for (unsigned int x = 0; x < COLS; x++) {
+            out_frame[y * COLS + x] = state->world[(PADDING + y) * PCOLS + (PADDING + x)] * 255;
         }
     }
 }

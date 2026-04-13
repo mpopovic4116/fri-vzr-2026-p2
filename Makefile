@@ -6,6 +6,7 @@ size_w ?= 256# Width
 size_h ?= $(size_w)# Height (blank means equal to width)
 kernel_size ?= 26# Convolution kernel size
 precision ?= 64# Floating point precision, 64, 32 or 16 (16 is really slow on CPU because no native instructions)
+toroid_impl ?= halo# Alternate ways of implementing wrapping, CPU only for now (naive, sections, halo)
 kernel ?= default# kernel implementation (default, shared, fused)
 toroid ?= bitwise# toroidal wrap with: (mod, bitwise)
 unroll ?=# Set to non-blank to use loop unrolling
@@ -27,7 +28,30 @@ CFLAGS := \
 PRINT_PREFIX := \
 	opt=$(opt) impl=$(impl) \
 	size_w=$(size_w) size_h=$(size_h) \
-	kernel_size=$(kernel_size) precision=$(precision) threads=$(threads_x)x$(threads_y)
+	kernel_size=$(kernel_size) precision=$(precision)
+
+IS_CPU :=
+ifeq ($(impl),seq)
+	IS_CPU := y
+endif
+ifeq ($(impl),omp)
+	IS_CPU := y
+endif
+
+ifeq ($(IS_CPU),y)
+ifeq ($(toroid_impl),naive)
+	CFLAGS += -DFEAT_TOROID_IMPL_NAIVE
+	PRINT_PREFIX += toroid_impl=naive
+endif
+ifeq ($(toroid_impl),sections)
+	CFLAGS += -DFEAT_TOROID_IMPL_SECTIONS
+	PRINT_PREFIX += toroid_impl=sections
+endif
+ifeq ($(toroid_impl),halo)
+	CFLAGS += -DFEAT_TOROID_IMPL_HALO
+	PRINT_PREFIX += toroid_impl=halo
+endif
+endif
 
 ifeq ($(cuda_arch),native)
 	CFLAGS += -arch=native
@@ -36,10 +60,8 @@ ifeq ($(cuda_arch),v100s)
 	CFLAGS += -gencode=arch=compute_70,code=sm_70
 endif
 
-ifneq ($(gif),)
-	CFLAGS += -DFEAT_GIF
-	PRINT_PREFIX += gif=y
-endif
+ifeq ($(impl),cuda)
+PRINT_PREFIX += threads=$(threads_x)x$(threads_y)
 
 ifeq ($(kernel),default)
 	CFLAGS += -DFEAT_DEFAULT_IMPL
@@ -60,10 +82,16 @@ ifneq ($(unroll),)
 endif
 
 ifeq ($(toroid),bitwise)
-    CFLAGS += -DFEAT_BITWISE_MASK
-    PRINT_PREFIX += toroid=bitwise
+	CFLAGS += -DFEAT_BITWISE_MASK
+	PRINT_PREFIX += toroid=bitwise
 else
-    PRINT_PREFIX += toroid=mod
+	PRINT_PREFIX += toroid=mod
+endif
+endif
+
+ifneq ($(gif),)
+	CFLAGS += -DFEAT_GIF
+	PRINT_PREFIX += gif=y
 endif
 
 CFLAGS += -DPRINT_PREFIX='"$(PRINT_PREFIX)"'
