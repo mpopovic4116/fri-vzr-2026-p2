@@ -1,16 +1,18 @@
 [project]
 name = "vzr-p2"
 version = "0.1.0"
-requires-python = "==3.14.*"
+requires-python = "==3.13.*"
 dependencies = [
     "jupyter>=1.1.1",
     "matplotlib>=3.10.8",
+    "numpy>=2.4.3",
     "pandas>=3.0.1",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
 ]
 
 [project.scripts]
+gif_comparator = "vzr_p2.gif_comparator:main"
 kvmean = "vzr_p2.kv_utils:main_kvmean"
 
 [build-system]

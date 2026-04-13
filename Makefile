@@ -120,5 +120,8 @@ $(DST):
 
 -include $(DEPS)
 
+clean_single:
+	rm -rf $(DST)
+
 clean:
 	rm -rf $(DST_DIR)
