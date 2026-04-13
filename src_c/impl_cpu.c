@@ -59,8 +59,10 @@ static void generate_kernel(fhost *K, const unsigned int size)
     // Rotate 180 degrees for consistency with reference implementation (our step does correlation instead of convolution)
     for (unsigned int y = 0; y < size; y++) {
         unsigned int y_other = size - 1 - y;
-        for (unsigned int x = 0; x < size - y; x++) {
+        for (unsigned int x = 0; x < size; x++) {
             unsigned int x_other = size - 1 - x;
+            if (y > y_other || (y == y_other && x >= x_other))
+                continue;
             fhost other = K[y_other * size + x_other];
             K[y_other * size + x_other] = K[y * size + x];
             K[y * size + x] = other;
