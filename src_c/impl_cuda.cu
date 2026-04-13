@@ -81,7 +81,7 @@ struct lenia_impl_state *lenia_impl_init()
     state->grid_size = ROWS * COLS * sizeof(fcuda);
     state->kernel_size_memory = FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE * sizeof(fcuda);
     state->threadsPerBlock = dim3(FEAT_THREAD_X, FEAT_THREAD_Y);
-    state->local_memory_size = (FEAT_THREAD_X + FEAT_KERNEL_SIZE) * (FEAT_THREAD_X + FEAT_KERNEL_SIZE) * sizeof(fcuda);
+    state->local_memory_size = (FEAT_THREAD_X + FEAT_KERNEL_SIZE) * (FEAT_THREAD_Y + FEAT_KERNEL_SIZE) * sizeof(fcuda);
     state->numBlocks = dim3((COLS + FEAT_THREAD_X - 1) / FEAT_THREAD_X, (ROWS + FEAT_THREAD_Y - 1) / FEAT_THREAD_Y);
     state->w_host = (fhost *) calloc(FEAT_KERNEL_SIZE * FEAT_KERNEL_SIZE, sizeof(fhost));
     state->world_host = (fhost *) calloc(ROWS * COLS, sizeof(fhost));
@@ -212,12 +212,13 @@ static __global__ void lenia_fused_kernel(fcuda *out_world, fcuda *in_world, int
 
     int r = k_size / 2;
     int shared_w = FEAT_THREAD_X + k_size;
+    int shared_h = FEAT_THREAD_Y + k_size;
 
     const fcuda mu = 0.15;
     const fcuda sigma = 0.015;
 
     // load tile and halo into local mem, same code chunk as in function `conv_kernel_shared`, go check that for comments if needed
-    for (int j = threadIdx.y; j < shared_w; j += FEAT_THREAD_Y) {
+    for (int j = threadIdx.y; j < shared_h; j += FEAT_THREAD_Y) {
 #ifdef FEAT_BITWISE_MASK
         int global_y = (blockIdx.y * FEAT_THREAD_Y - r + j + rows) & (rows - 1);
 #else
