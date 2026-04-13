@@ -3,7 +3,11 @@
 
 from collections import defaultdict
 from collections.abc import Mapping
+from io import StringIO
+from pathlib import Path
 from sys import stdin
+
+import pandas as pd
 
 
 def _parse_kv_single(kv: str) -> tuple[str, str] | None:
@@ -72,3 +76,10 @@ def main_kvmean():
                 current_vals[k] += v
             current_n += 1
     flush()
+
+
+def parse_kv_file(fpath: str | Path) -> pd.DataFrame:
+    with open(fpath, "r", encoding="utf-8") as f:
+        kv_lines = [kv for kv in map(parse_kv_line, f) if kv != {}]
+    df = pd.DataFrame(kv_lines)
+    return pd.read_csv(StringIO(df.to_csv(index=False)))
