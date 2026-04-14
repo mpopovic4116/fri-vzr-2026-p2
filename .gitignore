@@ -1,3 +1,7 @@
+# Git
+/archive.zip
+/archive.tar.gz
+
 # Direnv
 /.envrc.local
 /.direnv
