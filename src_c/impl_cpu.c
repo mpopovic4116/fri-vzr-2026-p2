@@ -117,9 +117,6 @@ static void kernel_universal(const fhost *restrict w, const fhost *restrict inpu
         int iy = (y - KRNL / 2 + ROWS + ky) % ROWS;
         const fhost *w_row = &w[ky * KRNL];
         const fhost *input_row = &input[iy * PCOLS];
-#ifdef FEAT_SIMD
-#pragma omp simd reduction(+ : sum)
-#endif
         for (int kx = 0; kx < KRNL; kx++) {
             int ix = (x - KRNL / 2 + COLS + kx) % COLS;
             sum += w_row[kx] * input_row[ix];
@@ -138,12 +135,12 @@ static void kernel_inner(const fhost *restrict w, const fhost *restrict input, f
         int iy = y - KRNL / 2 + ky;
         const fhost *w_row = &w[ky * KRNL];
         const fhost *input_row = &input[iy * PCOLS];
+        int ix_offset = x - KRNL / 2;
 #ifdef FEAT_SIMD
 #pragma omp simd reduction(+ : sum)
 #endif
         for (int kx = 0; kx < KRNL; kx++) {
-            int ix = x - KRNL / 2 + kx;
-            sum += w_row[kx] * input_row[ix];
+            sum += w_row[kx] * input_row[kx + ix_offset];
         }
     }
     fhost val = input[y * PCOLS + x];
