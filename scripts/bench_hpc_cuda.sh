@@ -23,12 +23,20 @@ cuda_bench() {
 
 for precision in 64 32; do
     for kernel in default shared fused; do
-        cuda_bench precision="$precision" kernel="$kernel"
-    done
-done
-
-for w in 32 64 128 256 512 1024; do
-    for h in 32 64 128 256 512 1024; do
-        cuda_bench precision=32 kernel=fused threads_x="$w" threads_y="$h"
+        for optimizations in y ''; do
+            if [ "$kernel" = default ] && [ -n "$optimizations" ]; then
+                continue
+            fi
+            if [ -n "$optimizations" ]; then
+                toroid=bitwise
+                unroll=y
+            else
+                toroid=mod
+                unroll=
+            fi
+            for block in 16x16 16x64 64x16 32x32; do
+                cuda_bench precision="$precision" kernel="$kernel" toroid="$toroid" unroll="$unroll" threads_x="${block%x*}" threads_y="${block#*x}"
+            done
+        done
     done
 done
